@@ -1,85 +1,134 @@
 # ELM EWM MCP
 
-Servidor MCP local para consultar o IBM Engineering Lifecycle Management, com foco no IBM Engineering Workflow Management em `/ccm`, usando autenticação Basic via token Base64.
+Servidor MCP local para consultar o IBM Engineering Lifecycle Management, com foco inicial no IBM Engineering Workflow Management em `/ccm`.
 
-O projeto foi construído para funcionar com um ambiente ELM compatível, onde o acesso por cliente HTTP tradicional via bibliotecas Python pode exigir ajuste de TLS/handshake. A implementação atual usa `curl.exe -k` e `Authorization: Basic <base64>`.
+O projeto expõe ferramentas MCP para listar projetos, consultar work items e obter detalhes de work items usando endpoints OSLC do EWM.
+
+> Status: projeto open source em desenvolvimento inicial.
 
 ## Objetivo
 
-Este repositório expõe, via MCP, capacidades de consulta ao EWM para:
+Este repositório foi criado para permitir que clientes compatíveis com MCP consultem dados do IBM ELM/EWM localmente, sem depender de serviços intermediários.
 
-- listar projetos visíveis no EWM
-- listar work items por projeto
-- obter os detalhes de um work item por ID
-- expor resources e prompt básicos para facilitar o uso em clientes MCP
+O foco atual é:
 
-O projeto foi pensado para uso local, dentro do workspace, sem depender de serviços intermediários.
+- listar áreas de projeto visíveis no EWM
+- listar work items de um projeto
+- obter detalhes de um work item por ID
+- expor resources e prompts básicos para facilitar o uso em clientes MCP
+- servir como base para automações locais com clientes como Cursor, Codex e outros clientes compatíveis com MCP
 
 ## Arquitetura
 
-O fluxo atual é intencionalmente simples:
+O fluxo atual é simples e local:
 
-1. o cliente MCP sobe em `stdio` via Python
+1. o cliente MCP inicia o servidor via `stdio`
 2. o servidor lê a configuração em `elm_credentials.json`
-3. o acesso ao servidor ELM é feito com `curl.exe -k`
+3. o acesso ao IBM ELM é feito usando `curl.exe -k`
 4. a autenticação usa `Authorization: Basic <token>`
-5. as respostas XML/JSON do ALM são transformadas em:
-   - `tools`
-   - `resources`
-   - `prompt`
+5. as respostas XML/JSON do ELM/EWM são transformadas em tools, resources e prompts MCP
 
-### Componentes principais
+## Componentes principais
 
-- `elm_mcp_server.py`
-  Implementação principal do servidor MCP.
+```text
+.
+├── elm_mcp_server.py
+├── elm_credentials.template.json
+├── .gitignore
+├── README.md
+└── LICENSE
+````
 
-- `elm_credentials.template.json`
-  Template de configuração para servir como base de preenchimento.
+### `elm_mcp_server.py`
 
-- `elm_credentials.json`
-  Arquivo local com segredos reais. Está ignorado pelo Git.
+Implementação principal do servidor MCP.
 
-- `.venv/`
-  Ambiente virtual local do projeto.
+### `elm_credentials.template.json`
 
-## Por que este projeto não usa `elmclient` no transporte principal
+Template de configuração. Deve conter apenas placeholders.
 
-Durante a integração com o ambiente ELM alvo, o acesso via `elmclient`/`requests` pode falhar no handshake TLS antes da autenticação HTTP. Já o método abaixo foi validado com sucesso:
+### `elm_credentials.json`
 
-```powershell
+Arquivo local com credenciais reais. Este arquivo não deve ser versionado.
+
+### `.gitignore`
+
+Ignora arquivos locais sensíveis e artefatos de ambiente, como:
+
+* `.venv/`
+* `elm_credentials.json`
+* `__pycache__/`
+
+## Por que o projeto usa `curl.exe -k`
+
+Durante os testes com o ambiente ELM alvo, o acesso via cliente HTTP tradicional em Python poderia falhar no handshake TLS antes da autenticação HTTP.
+
+O método validado foi:
+
+```bash
 curl.exe -k -H "Authorization: Basic <base64>" "<HOST>/ccm/rootservices"
 ```
 
-Como isso funcionou de forma consistente para:
+Esse método funcionou para:
 
-- `<HOST>/ccm/rootservices`
-- `<HOST>/jts/rootservices`
-- `<HOST>/ccm/process/project-areas`
-- endpoints OSLC de work items
+* `<HOST>/ccm/rootservices`
+* `<HOST>/jts/rootservices`
+* `<HOST>/ccm/process/project-areas`
+* endpoints OSLC de work items
 
-o servidor MCP passou a usar esse mesmo mecanismo internamente.
+Por isso, a implementação atual usa `curl.exe -k` internamente.
 
-Em outras palavras: a decisão arquitetural principal deste projeto é usar o método que foi comprovado no ambiente real.
+Essa decisão pode mudar no futuro, caso seja implementada uma camada HTTP mais portável com tratamento adequado de TLS/certificados.
 
-## Autenticação
+## Requisitos
 
-### Método suportado
+* Python 3.10 ou superior
+* Windows com `curl.exe` disponível no PATH
+* acesso de rede ao servidor IBM ELM/EWM
+* credenciais válidas para o ambiente ELM
+* cliente compatível com MCP
 
-O projeto usa autenticação Basic com token Base64 no formato:
+## Instalação
+
+### 1. Clonar o repositório
+
+```bash
+git clone https://github.com/hevener10/elm_alm_ibm_mcp.git
+cd elm_alm_ibm_mcp
+```
+
+### 2. Criar ambiente virtual
+
+No Windows:
+
+```powershell
+python -m venv .venv
+```
+
+### 3. Instalar dependências
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install elmclient "mcp[cli]"
+```
+
+> Observação: o projeto ainda instala `elmclient`, mas o caminho operacional principal usa `curl.exe` diretamente.
+
+## Configuração
+
+### 1. Criar arquivo local de credenciais
+
+```powershell
+Copy-Item .\elm_credentials.template.json .\elm_credentials.json
+```
+
+### 2. Gerar token Basic em Base64
+
+O token deve estar no formato:
 
 ```text
 usuario:senha
 ```
-
-Exemplo:
-
-```text
-usuario_exemplo:senha_exemplo
-```
-
-Depois disso, o valor é convertido para Base64.
-
-### Gerando o token
 
 No PowerShell:
 
@@ -87,21 +136,15 @@ No PowerShell:
 [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("usuario_exemplo:senha_exemplo"))
 ```
 
-No Linux:
+No Linux/macOS:
 
 ```bash
 echo -n "usuario_exemplo:senha_exemplo" | base64
 ```
 
-### Arquivo de credenciais
+### 3. Preencher `elm_credentials.json`
 
-Copie o template:
-
-```powershell
-Copy-Item .\elm_credentials.template.json .\elm_credentials.json
-```
-
-Preencha com seus dados:
+Exemplo:
 
 ```json
 {
@@ -118,54 +161,63 @@ Preencha com seus dados:
 }
 ```
 
-Se este repositório for compartilhado com outras pessoas, revise o conteúdo de `elm_credentials.template.json` antes de publicar para garantir que ele contenha apenas placeholders e nenhum valor sensível.
+No modo atual, os campos mais importantes são:
 
-### Campos realmente usados pelo cliente atual
+* `host`
+* `username`
+* `token`
+* `jts_context`
+* `ccm_context`
 
-No modo atual do projeto, os campos efetivamente relevantes são:
+O campo `verify_ssl` é mantido por compatibilidade de configuração, mas o transporte atual usa `curl.exe -k`.
 
-- `host`
-- `username`
-- `token`
-- `jts_context`
-- `ccm_context`
+## Segurança
 
-O campo `password` pode existir como fallback documental, mas o modo recomendado é usar `token`.
+Nunca publique credenciais reais.
 
-O campo `verify_ssl` hoje é mantido por compatibilidade de configuração, mas o acesso HTTP usa `curl.exe -k`, portanto ignora problemas de certificado do servidor.
+Antes de fazer commit, confirme que:
 
-## Estrutura do servidor
+* `elm_credentials.json` não foi adicionado ao Git
+* `elm_credentials.template.json` contém apenas placeholders
+* nenhum token Base64 aparece em screenshots, issues, logs ou commits
+* nenhum dado interno sensível do ambiente IBM ELM foi incluído no repositório
 
-O arquivo principal é `elm_mcp_server.py`.
+Para verificar arquivos rastreados:
 
-### Responsabilidades internas
+```bash
+git status
+```
 
-- `_load_config()`
-  Lê o arquivo de credenciais.
+Para procurar tokens ou valores sensíveis antes do commit:
 
-- `_curl_get()`
-  Faz chamadas autenticadas com `curl.exe -k`.
+```bash
+git diff
+```
 
-- `_curl_get_json()`
-  Faz chamadas autenticadas com cabeçalhos OSLC e resposta JSON.
+## Integração com cliente MCP
 
-- `_get_rootservices_xml()`
-  Lê o `rootservices` do `ccm`.
+Exemplo de configuração:
 
-- `_get_project_areas_xml()`
-  Lê os projetos do EWM em `/ccm/process/project-areas`.
+```json
+{
+  "mcpServers": {
+    "elm-ewm": {
+      "command": "python.exe",
+      "args": [
+        "C:/caminho/para/elm_alm_ibm_mcp/elm_mcp_server.py"
+      ]
+    }
+  }
+}
+```
 
-- `_get_project_service_url()`
-  Resolve o `services.xml` de um projeto a partir do catálogo OSLC.
-
-- `_get_project_query_base()`
-  Resolve o endpoint `simpleQuery` para work items de um projeto.
+Ajuste o caminho conforme a localização real do repositório no seu computador.
 
 ## Tools expostas
 
 ### `connection_info`
 
-Retorna um resumo da conexão e dos endpoints principais.
+Retorna um resumo da conexão configurada.
 
 Exemplo de retorno:
 
@@ -182,14 +234,14 @@ Exemplo de retorno:
 
 ### `list_projects`
 
-Lista as áreas de projeto visíveis no EWM.
+Lista áreas de projeto visíveis no EWM.
 
 Campos retornados:
 
-- `name`
-- `summary`
-- `uri`
-- `archived`
+* `name`
+* `summary`
+* `uri`
+* `archived`
 
 ### `list_workitems(project_name, pagesize=30)`
 
@@ -197,20 +249,20 @@ Lista work items de um projeto via OSLC Query.
 
 Retorna:
 
-- `project_name`
-- `totalCount`
-- `nextPage`
-- `items[]`
+* `project_name`
+* `totalCount`
+* `nextPage`
+* `items[]`
 
 Cada item contém:
 
-- `id`
-- `title`
-- `uri`
+* `id`
+* `title`
+* `uri`
 
 ### `get_workitem(project_name, workitem_id)`
 
-Consulta um work item específico pelo identificador no contexto do projeto informado.
+Consulta um work item específico pelo identificador informado.
 
 Retorna o payload OSLC completo do item.
 
@@ -228,8 +280,6 @@ Lista de projetos disponíveis no EWM.
 
 Lista inicial de work items do projeto informado.
 
-Atualmente retorna os 10 primeiros itens visíveis pela consulta OSLC configurada.
-
 ## Prompt exposto
 
 ### `consultar_ewm`
@@ -237,154 +287,148 @@ Atualmente retorna os 10 primeiros itens visíveis pela consulta OSLC configurad
 Prompt base para orientar o cliente MCP a:
 
 1. ler a conexão
-2. ler os projetos
+2. listar projetos
 3. selecionar um projeto
-4. listar os work items
-5. aprofundar em um work item por ID
+4. listar work items
+5. consultar um work item específico por ID
 
-## Integração
+## Como testar localmente
 
-Exemplo:
-
-```json
-{
-  "mcpServers": {
-    "elm-ewm": {
-      "command": "python.exe",
-      "args": [
-        "elm-mcp/elm_mcp_server.py"
-      ]
-    }
-  }
-}
-```
-
-## Como executar
-
-### 1. Criar ambiente virtual
-
-```powershell
-python -m venv .venv
-```
-
-### 2. Instalar dependências
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install elmclient "mcp[cli]"
-```
-
-Observação: o projeto ainda instala `elmclient`, mas o caminho operacional principal usa `curl.exe` diretamente.
-
-### 3. Criar credenciais locais
-
-```powershell
-Copy-Item .\elm_credentials.template.json .\elm_credentials.json
-```
-
-### 4. Preencher o token Base64
-
-Edite `elm_credentials.json` com seus dados reais.
-
-### 5. Iniciar via cliente MCP
-
-O uso normal é pelo cliente MCP em `stdio`.
-
-Para testes locais de sintaxe:
+Validar sintaxe do arquivo principal:
 
 ```powershell
 .\.venv\Scripts\python.exe -m py_compile .\elm_mcp_server.py
 ```
 
+Testar acesso manual ao ELM:
+
+```powershell
+curl.exe -k -H "Authorization: Basic <TOKEN_BASE64>" "https://exemplo-elm/ccm/rootservices"
+```
+
 ## Validações feitas
 
-Este projeto foi validado com:
+O projeto foi validado com chamadas para:
 
-- `<HOST>/ccm/rootservices`
-- `<HOST>/jts/rootservices`
-- `<HOST>/ccm/process/project-areas`
-- `oslc/workitems/catalog`
-- `services.xml` de projeto
-- consultas OSLC de work items em JSON
+* `/ccm/rootservices`
+* `/jts/rootservices`
+* `/ccm/process/project-areas`
+* `/ccm/oslc/workitems/catalog`
+* `services.xml` de projeto
+* consultas OSLC de work items em JSON
 
 Também foi validado localmente:
 
-- carregamento do MCP
-- leitura de resources
-- leitura de tools
-- retorno de work items de exemplo do projeto configurado
+* carregamento do MCP
+* leitura de resources
+* leitura de tools
+* retorno de work items de exemplo do projeto configurado
 
 ## Limitações conhecidas
 
-### Codificação de caracteres
-
-Algumas respostas podem aparecer com acentuação parcialmente degradada no Windows por causa da forma como o `curl.exe` e a saída textual retornam os bytes. A consulta continua funcional, mas a apresentação pode exigir refinamento adicional.
-
 ### Dependência de Windows
 
-O cliente atual depende explicitamente de `curl.exe`, então o comportamento foi pensado para Windows.
+A versão atual depende explicitamente de `curl.exe`, então o comportamento foi pensado inicialmente para Windows.
 
-### Escopo atual
+### TLS/certificados
+
+O transporte atual usa `curl.exe -k`, o que ignora validação estrita de certificado.
+
+Isso é útil para ambientes internos com certificados corporativos ou autoassinados, mas deve ser melhorado em versões futuras.
+
+### Codificação de caracteres
+
+Algumas respostas podem aparecer com acentuação parcialmente degradada no Windows por causa da forma como a saída textual do `curl.exe` retorna os bytes.
+
+### Escopo funcional
 
 O foco atual é EWM em `/ccm`.
 
-Ainda não há implementação dedicada para:
+Ainda não há implementação completa para:
 
-- consultas em `rm`
-- consultas em `qm`
-- paginação orientada a cursor além do `nextPage` bruto
-- busca textual avançada por status, tipo ou campos personalizados
+* RM em `/rm`
+* QM em `/qm`
+* navegação avançada por paginação OSLC
+* busca textual avançada
+* filtros por status
+* filtros por tipo
+* filtros por campos customizados
 
-## Troubleshooting
+## Roadmap
 
-### O MCP conecta mas parece “vazio”
+Próximas melhorias planejadas:
 
-Verifique:
+* corrigir completamente problemas de codificação no Windows
+* substituir o uso fixo de `curl.exe` por uma camada HTTP portável
+* adicionar paginação navegável por `nextPage`
+* adicionar busca de work items por texto
+* adicionar filtros por status, tipo e campos customizados
+* adicionar testes automatizados
+* adicionar GitHub Actions para validação básica
+* melhorar documentação para Cursor, Codex e outros clientes MCP
+* adicionar suporte futuro a RM, QM e JTS
+* criar exemplos seguros sem credenciais reais
 
-- se `elm_credentials.json` existe
-- se o `token` Base64 está correto
-- se o cliente MCP está apontando para `elm_mcp_server.py`
+## Contribuindo
 
-### `Projeto não encontrado`
+Contribuições são bem-vindas.
 
-O nome do projeto precisa coincidir com o catálogo OSLC do EWM. Leia primeiro o resource `elm://projects` ou use a tool `list_projects`.
+Antes de abrir um pull request:
 
-### `curl.exe` falha
+1. crie uma branch descritiva
+2. evite incluir credenciais, URLs internas ou dados sensíveis
+3. teste localmente a sintaxe do Python
+4. descreva claramente o problema resolvido
+5. inclua exemplos de uso quando fizer sentido
 
-Confirme:
+Exemplo:
 
-- acesso de rede ao host configurado
-- token Base64 válido
-- disponibilidade do `curl.exe` no Windows
+```bash
+git checkout -b fix/windows-encoding
+```
 
-## Sugestões de evolução
+## Aviso sobre IBM
 
-Próximos passos naturais para este repositório:
+Este projeto não é afiliado, endossado ou mantido pela IBM.
 
-- corrigir completamente a codificação dos acentos
-- adicionar busca de work items por texto, status e tipo
-- expor paginação navegável por `nextPage`
-- adicionar suporte a `rm` e `jts` além do `ccm`
-- documentar exemplos de prompts de uso em Cursor
+IBM, Engineering Lifecycle Management, Engineering Workflow Management e nomes relacionados pertencem aos seus respectivos proprietários.
 
-## Segurança
+## Licença
 
-- `elm_credentials.json` contém segredo e deve permanecer fora do Git
-- `.venv/` não deve ser versionado
-- nunca publique o token Base64 em screenshots, issues ou commits
-- antes de distribuir o repositório, valide que `elm_credentials.template.json` não contém credenciais reais
+Este projeto está licenciado sob a **MIT License**.
 
-O arquivo `.gitignore` já cobre:
+Consulte o arquivo [`LICENSE`](./LICENSE) para mais detalhes.
 
-- `.venv/`
-- `elm_credentials.json`
-- `__pycache__/`
+## Autor
 
-## Licença e uso
+Mantido por `hevener10`.
 
-Este repositório foi montado para uso operacional local no workspace do projeto e para integração via MCP. Se ele evoluir para um repositório compartilhado, vale adicionar explicitamente:
+````
 
-- licença
-- changelog
-- instruções de contribuição
-- exemplos versionados sem segredo
+E crie também um arquivo novo chamado `LICENSE` na raiz do projeto com este conteúdo:
+
+```text
+MIT License
+
+Copyright (c) 2026 hevener10
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the “Software”), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+````
+[2]: https://docs.github.com/articles/licensing-a-repository?utm_source=chatgpt.com "Licensing a repository"
+[3]: https://choosealicense.com/licenses/mit/?utm_source=chatgpt.com "MIT License | Choose a License"
