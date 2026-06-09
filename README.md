@@ -11,6 +11,9 @@ Este repositório expõe, via MCP, capacidades de consulta ao EWM para:
 - listar projetos visíveis no EWM
 - listar work items por projeto
 - obter os detalhes de um work item por ID
+- buscar work items por usuario e papel
+- listar work items assinados pelo usuario em `Minhas Assinaturas`
+- ler eventos recentes do feed de assinaturas
 - expor resources e prompt básicos para facilitar o uso em clientes MCP
 
 O projeto foi pensado para uso local, dentro do workspace, sem depender de serviços intermediários.
@@ -161,6 +164,15 @@ O arquivo principal é `elm_mcp_server.py`.
 - `_get_project_query_base()`
   Resolve o endpoint `simpleQuery` para work items de um projeto.
 
+- `_user_ccm_oslc_uri_from_identifier()`
+  Monta a URI OSLC do usuario no CCM (`/ccm/oslc/users/{userId}`), usada para consultas de assinaturas.
+
+- `_parse_rdf_workitem_summary()`
+  Lê o RDF de um work item e confirma se o usuario aparece em `rtc_cm:subscribers`.
+
+- `_parse_subscription_feed_events()`
+  Lê Atom XML do feed de assinaturas e extrai eventos recentes.
+
 ## Tools expostas
 
 ### `connection_info`
@@ -214,6 +226,40 @@ Consulta um work item específico pelo identificador no contexto do projeto info
 
 Retorna o payload OSLC completo do item.
 
+### `search_workitems_by_user(project_name, user, start_date="", end_date="", roles="modifiedBy,creator,contributor,subscribers,resolvedBy", pagesize=100, max_items=500)`
+
+Pesquisa work items por usuario e papeis no projeto informado.
+
+Para o papel `subscribers`, a consulta agora usa a estrategia dedicada de assinaturas por URI OSLC do CCM quando nao ha filtro de data.
+
+### `list_subscribed_workitems(user="", project_name="", include_archived_projects=false, pagesize=100, max_items=500, verify_rdf=false, fallback_workitem_ids="", use_feed_fallback=true, feed_max_results=100)`
+
+Lista work items assinados pelo usuario, equivalente operacional ao conceito de `Minhas Assinaturas`.
+
+Comportamento:
+
+- se `user` estiver vazio, usa o `username` configurado em `elm_credentials.json`
+- se `project_name` estiver vazio, percorre os projetos visiveis nao arquivados
+- consulta por projeto com `rtc_cm:subscribers="https://host/ccm/oslc/users/{userId}"`
+- também tenta URIs alternativas do usuario para compatibilidade
+- com `verify_rdf=true`, lê o RDF do work item e confirma `rtc_cm:subscribers`
+- com `use_feed_fallback=true`, lê IDs do feed de assinaturas e confirma cada item via RDF quando a consulta OSLC nao encontra itens
+- com `fallback_workitem_ids`, valida IDs específicos via RDF mesmo quando a consulta OSLC nao encontra o item
+
+Retorna `items[]` com identificador, titulo, status, datas, URI, projeto, URI de assinante casada e origem da consulta.
+
+### `list_subscription_feed(user="", start_date="", end_date="", max_results=50, enrich_workitems=false, project_name="")`
+
+Lê eventos recentes do feed de assinaturas do usuario.
+
+A tool tenta acessar o endpoint interno do EWM:
+
+```text
+/ccm/service/com.ibm.team.repository.common.internal.IFeedService?itemType=WorkItem&user={userId}&maxResults={max_results}
+```
+
+Retorna `events[]` com titulo, data, autor, link, resumo e `workitem_id` quando detectado. Com `enrich_workitems=true`, cada evento tenta anexar um resumo RDF do work item.
+
 ## Resources expostos
 
 ### `elm://connection-info`
@@ -241,6 +287,8 @@ Prompt base para orientar o cliente MCP a:
 3. selecionar um projeto
 4. listar os work items
 5. aprofundar em um work item por ID
+6. usar `list_subscribed_workitems` quando a pergunta envolver assinaturas, itens seguidos ou `Minhas Assinaturas`
+7. usar `list_subscription_feed` quando a pergunta envolver feed, eventos recentes, comentarios ou alteracoes nas assinaturas
 
 ## Integração
 
@@ -306,6 +354,7 @@ Este projeto foi validado com:
 - `oslc/workitems/catalog`
 - `services.xml` de projeto
 - consultas OSLC de work items em JSON
+- leitura RDF de work items para validar `rtc_cm:subscribers`
 
 Também foi validado localmente:
 
@@ -334,6 +383,10 @@ Ainda não há implementação dedicada para:
 - consultas em `qm`
 - paginação orientada a cursor além do `nextPage` bruto
 - busca textual avançada por status, tipo ou campos personalizados
+
+### Feed de assinaturas
+
+`list_subscription_feed` usa um endpoint interno do EWM (`IFeedService`). Se uma versão ou configuração do servidor não expuser esse serviço, a tool retorna o erro em JSON e a alternativa recomendada é usar `list_subscribed_workitems` com `verify_rdf=true` ou `fallback_workitem_ids`.
 
 ## Troubleshooting
 
